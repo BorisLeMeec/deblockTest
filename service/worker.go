@@ -8,13 +8,12 @@ import (
 	"time"
 
 	"github.com/ethereum/go-ethereum/core/types"
-	"github.com/ethereum/go-ethereum/ethclient"
 
 	"deblockTest/pkg"
 )
 
 type Worker struct {
-	client     *ethclient.Client
+	client     EthereumBlockGetter
 	userGetter UserGetter
 	publisher  Publisher
 	state      State
@@ -40,17 +39,20 @@ func (w *Worker) Run(ctx context.Context) {
 		if len(msgs) > 0 {
 			w.publisher.Publish(ctx, msgs)
 		}
-
 		w.ackChan <- block.NumberU64()
 	}
 }
 
 func (w *Worker) processBlock(block *types.Block) []pkg.TxMessage {
 	var msgs []pkg.TxMessage
-	log.Printf("Processing block %d\n", block.NumberU64())
+	// log.Printf("Processing block %d\n", block.NumberU64())
 
 	for _, tx := range block.Transactions() {
-		signer := types.NewLondonSigner(tx.ChainId())
+		chainID := tx.ChainId()
+		if chainID.Sign() == 0 {
+			continue
+		}
+		signer := types.NewLondonSigner(chainID)
 		from, _ := types.Sender(signer, tx)
 		to := tx.To()
 
@@ -87,7 +89,6 @@ func (w *Worker) processBlock(block *types.Block) []pkg.TxMessage {
 			})
 		}
 	}
-	log.Printf("Processed %d transactions, produced %d messages\n", len(block.Transactions()), len(msgs))
-
+	// log.Printf("Processed %d transactions, produced %d messages\n", len(block.Transactions()), len(msgs))
 	return msgs
 }

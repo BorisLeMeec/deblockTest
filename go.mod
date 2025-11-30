@@ -6,6 +6,7 @@ require (
 	github.com/bits-and-blooms/bloom/v3 v3.7.1
 	github.com/ethereum/go-ethereum v1.16.7
 	github.com/segmentio/kafka-go v0.4.49
+	go.uber.org/mock v0.6.0
 )
 
 require (

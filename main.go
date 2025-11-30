@@ -20,7 +20,7 @@ import (
 )
 
 const (
-	rpcURL         = "https://eth-mainnet.g.alchemy.com/v2/u8yz_jsuLiEj3-fg5DyDo"
+	rpcURL         = "https://eth-mainnet.g.alchemy.com/v2/"
 	kafkaBroker    = "localhost:9092"
 	kafkaTopic     = "eth-transactions"
 	checkpointFile = "checkpoint.txt"
@@ -51,7 +51,11 @@ func main() {
 	k := kafka.NewFromConfig(&kafka.Config{Broker: kafkaBroker, Topic: kafkaTopic})
 	defer k.Close()
 
-	client, err := ethclient.Dial(rpcURL)
+	if len(os.Args) < 2 {
+		log.Fatal("missing eth api key")
+	}
+
+	client, err := ethclient.Dial(rpcURL + os.Args[1])
 	if err != nil {
 		log.Fatal(err)
 	}

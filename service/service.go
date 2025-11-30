@@ -1,16 +1,22 @@
+//go:generate mockgen -typed -source=$GOFILE -destination=mocks/mock_$GOFILE -package=mocks
 package service
 
 import (
 	"context"
 	"log"
-	"sync/atomic"
+	"math/big"
 	"time"
 
 	"deblockTest/pkg"
 
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/ethclient"
+	"github.com/ethereum/go-ethereum/core/types"
 )
+
+type EthereumBlockGetter interface {
+	BlockNumber(ctx context.Context) (uint64, error)
+	BlockByNumber(ctx context.Context, number *big.Int) (*types.Block, error)
+}
 
 type Publisher interface {
 	Publish(ctx context.Context, msgs []pkg.TxMessage)
@@ -26,17 +32,18 @@ type State interface {
 }
 
 type Service struct {
-	config     *Config
-	client     *ethclient.Client
-	userGetter UserGetter
-	publisher  Publisher
-	state      State
-	blocks     chan uint64
-	retryChan  chan uint64
-	ackChan    chan uint64
+	config         *Config
+	client         EthereumBlockGetter
+	userGetter     UserGetter
+	publisher      Publisher
+	state          State
+	blocks         chan uint64
+	retryChan      chan uint64
+	ackChan        chan uint64
+	processedCount uint64
 }
 
-func NewService(config *Config, ethClient *ethclient.Client, ug UserGetter, p Publisher, s State) *Service {
+func NewService(config *Config, ethClient EthereumBlockGetter, ug UserGetter, p Publisher, s State) *Service {
 	return &Service{
 		config:     config,
 		client:     ethClient,
@@ -51,14 +58,12 @@ func (s *Service) Setup(ctx context.Context) {
 	s.retryChan = make(chan uint64, 1000)
 	s.ackChan = make(chan uint64, 1000)
 
-	var processedBlocks atomic.Uint64
 	for i := 0; i < s.config.WorkerCount; i++ {
 		w := Worker{
 			client:     s.client,
 			userGetter: s.userGetter,
 			publisher:  s.publisher,
 			blocks:     s.blocks,
-			processed:  &processedBlocks,
 			retryChan:  s.retryChan,
 			ackChan:    s.ackChan,
 		}
@@ -84,12 +89,12 @@ func (s *Service) Run(ctx context.Context) {
 	var startBlock uint64
 	if checkpoint == 0 {
 		// First run ever, we jump to real-time.
-		log.Printf("No checkpoint found, starting real-time mode from block %d", latest)
+		// log.Printf("No checkpoint found, starting real-time mode from block %d", latest)
 		startBlock = latest
 	} else {
 		// Resume from where we stopped last time.
 		startBlock = checkpoint + 1
-		log.Printf("Starting from checkpoint at block %d", startBlock)
+		// log.Printf("Starting from checkpoint at block %d", startBlock)
 	}
 
 	var nextExpectedBlock = startBlock
@@ -129,11 +134,12 @@ func (s *Service) Run(ctx context.Context) {
 		for drained {
 			select {
 			case ackedBlock := <-s.ackChan:
+				s.processedCount++
 				if ackedBlock == nextExpectedBlock {
 					nextExpectedBlock++
 					// Save checkpoint every 5 confirmed blocks
 					if nextExpectedBlock%5 == 0 {
-						log.Printf("Saving checkpoint at block %d", nextExpectedBlock-1)
+						// log.Printf("Saving checkpoint at block %d", nextExpectedBlock-1)
 						_ = s.state.SaveCheckpoint(nextExpectedBlock - 1)
 					}
 				}
@@ -142,7 +148,9 @@ func (s *Service) Run(ctx context.Context) {
 			}
 		}
 
-		log.Printf("Taking a nap for %s...", s.config.PollInterval)
+		// log.Printf("waiting for a new block...")
 		time.Sleep(s.config.PollInterval)
 	}
 }
+
+func (s *Service) TestBlockChan() chan<- uint64 { return s.blocks }
